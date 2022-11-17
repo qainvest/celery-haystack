@@ -7,16 +7,20 @@ from .conf import settings
 from haystack import connections, connection_router
 from haystack.exceptions import NotHandled as IndexNotFoundException
 
-from celery import Task  # noqa
+from celery import shared_task  # noqa
 from celery.utils.log import get_task_logger
 
 logger = get_task_logger(__name__)
 
 
-class CeleryHaystackSignalHandler(Task):
+class CeleryHaystackSignalHandler:
     using = settings.CELERY_HAYSTACK_DEFAULT_ALIAS
     max_retries = settings.CELERY_HAYSTACK_MAX_RETRIES
     default_retry_delay = settings.CELERY_HAYSTACK_RETRY_DELAY
+
+    def __init__(self, task) -> None:
+        super().__init__()
+        self.task = task
 
     def split_identifier(self, identifier, **kwargs):
         """
@@ -103,7 +107,7 @@ class CeleryHaystackSignalHandler(Task):
                     current_index.remove_object(identifier, using=using)
                 except Exception as exc:
                     logger.exception(exc)
-                    self.retry(exc=exc)
+                    self.task.retry(exc=exc)
                 else:
                     msg = ("Deleted '%s' (with %s)" %
                            (identifier, current_index_name))
@@ -122,7 +126,7 @@ class CeleryHaystackSignalHandler(Task):
                     current_index.update_object(instance, using=using)
                 except Exception as exc:
                     logger.exception(exc)
-                    self.retry(exc=exc)
+                    self.task.retry(exc=exc)
                 else:
                     msg = ("Updated '%s' (with %s)" %
                            (identifier, current_index_name))
@@ -132,11 +136,16 @@ class CeleryHaystackSignalHandler(Task):
                 raise ValueError("Unrecognized action %s" % action)
 
 
-class CeleryHaystackUpdateIndex(Task):
+class CeleryHaystackUpdateIndex:
     """
     A celery task class to be used to call the update_index management
     command from Celery.
     """
+
+    def __init__(self, task) -> None:
+        super().__init__()
+        self.task = task
+
     def run(self, apps=None, **kwargs):
         defaults = {
             'batchsize': settings.CELERY_HAYSTACK_COMMAND_BATCH_SIZE,
@@ -153,3 +162,13 @@ class CeleryHaystackUpdateIndex(Task):
         logger.info("Starting update index")
         call_command('update_index', *apps, **defaults)
         logger.info("Finishing update index")
+
+
+@shared_task(bind=True)
+def signal_handler(self, action, identifier):
+    CeleryHaystackSignalHandler(self).run(action, identifier)
+
+
+@shared_task(bind=True)
+def update_index(self, apps=None):
+    CeleryHaystackUpdateIndex(self).run(apps)
