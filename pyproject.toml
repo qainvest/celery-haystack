@@ -3,7 +3,7 @@ name = "celery-haystack"
 version = "0.10"
 description = ""
 authors = ["Your Name <you@example.com>"]
-readme = "README.md"
+readme = "README.rst"
 
 [tool.poetry.dependencies]
 python = "^3.9"
